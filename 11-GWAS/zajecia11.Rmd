@@ -1,0 +1,273 @@
+---
+title: '2'
+author: "Martyna"
+date: "2025-01-21"
+output: html_document
+---
+
+Raport z analizy GWAS (Badanie Asocjacji Całogenomowych)
+
+# Opis metody
+
+Badanie GWAS (Genome-Wide Association Study) to technika pozwalająca na identyfikację zależności między wariantami genetycznymi (przede wszystkim SNP – polimorfizmami pojedynczych nukleotydów) a różnymi cechami fenotypowymi, takimi jak predyspozycje do chorób, cechy fizyczne czy reakcje organizmu na leczenie. GWAS znajduje szerokie zastosowanie w genomice roślin, medycynie oraz w badaniach różnorodności genetycznej.
+
+# Badanie GWAS pozwala na:
+
+- lepsze zrozumienie genetycznych uwarunkowań chorób lub cech fenotypowych
+- identyfikowanie genów związanych z określonymi cechami
+- wykrywanie biomarkerów, które mogą być przydatne w diagnostyce lub doborze odpowiedniej terapii
+
+## 1. Wczytanie pakietów:
+
+Na początku załadowano niezbędne pakiety do analizy danych genotypowych:
+
+- rrBLUP – do analizy zależności między genotypami a fenotypami
+- BGLR – do zaawansowanej analizy genotypów
+- SNPRelate – do analizy danych SNP
+- dplyr – do manipulacji danymi
+- qqman – do wizualizacji wyników GWAS
+- poolr – do przeprowadzania analiz statystycznych i obliczeń na danych genotypowych
+   
+
+```{r}
+packages <- c("rrBLUP"
+   , "BGLR"
+   , "DT"
+   , "SNPRelate"
+   , "dplyr"
+   , "qqman"
+   , "poolr")
+
+{for (pkg in packages) {
+  if(!require(pkg, character.only = TRUE)) {
+    install.packages(pkg, dependencies = TRUE)
+    }
+  }
+}
+
+library(pkg, character.only = TRUE)
+```
+
+## 2. Wczytanie danych genotypowych i fenotypowych
+
+Dane zostały załadowane z plików .ped, .fam i .map, które zawierają informacje o genotypach, próbkach oraz mapowanie markerów SNP. Sprawdzono zgodność danych, aby upewnić się, że są poprawne.
+
+```{r}
+Geno <- read_ped("sativas413.ped")
+# wczytujemy kolumny jako osobne wartości
+p = Geno$p
+n = Geno$n
+Geno = Geno$x
+head(Geno)
+Geno
+
+FAM <- read.table("sativas413.fam")
+head(FAM)
+
+MAP <- read.table("sativas413.map")
+head(MAP)
+```
+
+# Przekodowanie wartości markerów
+
+Wartości markerów zostały zmienione w następujący sposób:
+
+- Wartość 2 została zamieniona na NA (brakujące dane)
+- Wartość 0 została zamieniona na 0 (homozygota dla allelu dominującego)
+- Wartość 1 została zamieniona na 1 (heterozygota)
+- Wartość 3 została zamieniona na 2 (homozygota dla allelu recesywnego)
+  
+```{r}
+Geno[Geno == 2] <- NA
+Geno[Geno == 0] <- 0
+Geno[Geno == 1] <- 1
+Geno[Geno == 3] <- 2
+```
+
+# Przekonwertowanie danych na macierz i dokonanie transpozycji
+
+Dane genotypowe zostały przekształcone w formę macierzy, co ułatwiło dalszą analizę. Transponowanie macierzy pozwoliło na jej właściwe uporządkowanie do analizy. Ostateczne wymiary macierzy to: 413 osobników, 36901 markerów SNP.
+
+```{r}
+Geno <- matrix(Geno, nrow = p, ncol = n, byrow = TRUE)
+Geno <- t(Geno)
+```
+
+```{r}
+dim(Geno)
+```
+
+## 3. Wczytanie danych fenotypowych
+
+Dane fenotypowe, zawierające informacje o cechach próbek, zostały załadowane i powiązane z danymi genotypowymi. Identyfikatory próbek zostały przypisane do odpowiednich wierszy w macierzy genotypowej.
+
+```{r}
+rice.pheno <- read.table("RiceDiversity_44K_Phenotypes_34traits_PLINK.txt",
+                         header = TRUE, stringsAsFactors = FALSE, sep = "\t")
+head(rice.pheno)
+
+# wymiary - pierwsza wartość powinna być taka sama jak w `dim(Geno)`
+dim(rice.pheno)
+
+# przypisujemy nazwy wierszy dla macierzy Geno na podstawie drugiej kolumny (V2) z ramki FAM, zawierającej identyfikatory próbek
+
+rownames(Geno) <- FAM$V2
+
+# sprawdzenie zgodności
+table(rownames(Geno) == rice.pheno$NSFTVID)
+```
+
+# Wyodrębnienie pierwszej cechy
+
+```{r}
+y <- matrix(rice.pheno$Flowering.time.at.Arkansas)
+rownames(y) <- rice.pheno$NSFTVID
+index <- !is.na(y)
+y <- y[index, 1, drop = FALSE]
+Geno <- Geno[index, ]
+table(rownames(Geno) == rownames(y))
+```
+
+## 4. Kontrola jakości (QC) danych markerów
+
+Przeprowadzono kontrolę jakości danych markerów. Wartości NA zostały zastąpione średnią wartością dla danego markera. Po przeprowadzeniu filtracji markerów (MAP1), usunięto te, które wykazywały niską różnorodność genetyczną (MAF < 5%). W wyniku filtracji liczba markerów SNP zmniejszyła się z 36901 do 36542.
+
+```{r}
+for (j in 1:ncol(Geno)){
+  Geno[, j] <- ifelse(is.na(Geno[, j]), mean(Geno[, j], nar.rm = TRUE), Geno[, j])
+}
+```
+
+# Odfiltrowanie markerów z MAF < 5%
+
+```{r}
+# obliczanie frekwencji allelu mniejszościowego dla każdego SNP
+p <- colSums(Geno)/(2 * nrow(Geno))
+
+# definiujemy MAF
+maf <- ifelse(p > 0.5, 1-p, p)
+maf.index <- which(maf < 0.05)
+Geno1 <- Geno[, -maf.index]
+
+# sprawdzamy wymiary nowej macierzy
+dim(Geno1)
+```
+
+# Zaktualizowanie  pliku `.map` i podanie nowych wymiarów danych genotypowych oraz informacji o markerach
+
+```{r}
+MAP <- read.table("sativas413.map")
+dim(MAP)
+MAP1 <- MAP[-maf.index, ]
+dim(MAP1)
+```
+
+## 5. Analiza PCA
+
+Zrealizowano analizę głównych składowych (PCA) w celu oceny różnorodności genotypowej próbek. Wizualizacja wyników PCA ujawniła trzy grupy próbek, które wykazywały różnice między sobą, ale miały również podobieństwa genotypowe.
+
+```{r}
+Geno1 <- as.matrix(Geno1)
+sample <- row.names(Geno1)
+length(sample)
+
+colnames(Geno1) <- MAP1$V2
+snp.id <- colnames(Geno1)
+length(snp.id)
+```
+
+# Utwórzenie pliku GDS
+
+```{r}
+snpgdsCreateGeno("44k.gds", genmat = Geno1, sample.id = sample, snp.id = snp.id, 
+                 snp.chromosome = MAP1$V1, snp.position = MAP1$V4, snpfirstdim = FALSE)
+
+geno_44k <- snpgdsOpen("44k.gds")
+snpgdsSummary("44k.gds")
+```
+
+# Przeprowadzenie PCA
+
+```{r}
+pca <- snpgdsPCA(geno_44k, snp.id = colnames(Geno1))
+pca <- data.frame(sample.id = row.names(Geno1), 
+                  EV1 = pca$eigenvect[, 1], 
+                  EV2 = pca$eigenvect[, 2], 
+                  EV3 = pca$eigenvect[, 3], 
+                  EV4 = pca$eigenvect[, 4], 
+                  stringsAsFactors = FALSE)
+
+plot(pca$EV2, pca$EV1, xlab = "PC2", ylab = "PC1")
+```
+
+# Wczytanie dodatkowych informacji o próbkach z pliku `gerplasm.csv`
+
+```{r}
+pca_1 <- read.csv("RiceDiversity.44K.germplasm.csv", 
+                  header = TRUE, skip = 1, stringsAsFactors = FALSE)
+pca_2 <- pca_1[match(pca$sample.id, pca_1$NSFTV.ID), ]
+
+pca_population <- cbind(pca_2$Sub.population, pca)
+colnames(pca_population)[1] <- "population"
+
+plot(pca_population$EV1, pca_population$EV2, xlab = "PC1", ylab = "PC2", 
+     col = c(1:6)[factor(pca_population$population)])
+legend(x = "topright", legend = levels(factor(pca_population$population)), 
+       col = c(1:6), pch = 1, cex = 0.6)
+```
+
+## 6. Przygotowanie danych do analizy GWAS
+
+Dane genotypowe i fenotypowe zostały przygotowane do analizy GWAS. Genotypy zostały uporządkowane w tabeli zawierającej informacje o markerach SNP, a dane fenotypowe przypisano do właściwych próbek.
+
+```{r}
+geno_final <- data.frame(marker = MAP1[, 2], chrom = MAP1[, 1], pos = MAP1[, 4], 
+                         t(Geno1 - 1), check.names = FALSE)
+
+pheno_final <- data.frame(NSFTV_ID = rownames(y), y = y)
+```
+
+# Analiza GWAS
+
+Przeprowadzono analizę GWAS, aby zidentyfikować związki między wariantami genotypowymi a cechami fenotypowymi. Wyniki umożliwiły wykrycie markerów SNP, które były statystycznie skorelowane z określonymi cechami fenotypowymi.
+
+```{r}
+GWAS <- GWAS(pheno_final, geno_final, min.MAF = 0.05, P3D = TRUE, plot = FALSE)
+```
+
+
+## 8. Identyfikacja istotnych markerów SNP
+
+Po przeprowadzeniu analizy GWAS, wyodrębniono markery SNP, które wykazały statystycznie istotne powiązanie z cechami fenotypowymi. Po zastosowaniu filtra na podstawie wartości p-value (y < 1e-04), wybrano 6 markerów SNP zlokalizowanych na chromosomie 1.
+
+```{r}
+GWAS_1 <- GWAS %>% filter(y != "0")
+GWAS_1 %>% filter(y < 1e-04)
+```
+
+# Lista markerów SNP spełniających ustalone kryterium p-wartości.
+
+```{r}
+head(GWAS_1)
+```
+
+## 9. Wykres Manhattan
+
+Na końcu stworzono wykres Manhattan, który ilustruje rozmieszczenie markerów SNP na chromosomach, umożliwiając wizualizację obszarów genomu, które wykazują silne powiązanie z badaną cechą.
+
+```{r}
+manhattan(x = GWAS_1, chr = "chrom", bp = "pos", p = "y", snp = "marker", 
+          col = c("blue4", "orange3"), suggestiveline = -log10(1e-04), logp = TRUE)
+```
+
+## 10. Podsumowanie
+
+Podsumowując, analiza GWAS umożliwiła identyfikację markerów genetycznych związanych z cechami fenotypowymi. W ramach raportu wykonano następujące kroki:
+
+- Wczytanie i wstępną obróbkę danych genotypowych oraz fenotypowych
+- Przeprowadzenie kontroli jakości danych markerów SNP
+- Analiza PCA
+- Przygotowanie danych do analizy GWAS
+- Wykonanie analizy GWAS
+- Wyodrębnienie istotnych markerów SNP
+- Stworzenie wykresu Manhattan do wizualizacji wyników
