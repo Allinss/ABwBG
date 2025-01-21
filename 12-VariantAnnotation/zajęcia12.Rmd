@@ -1,0 +1,122 @@
+---
+title: "3"
+author: "Martyna"
+date: "2025-01-21"
+output: html_document
+
+# Raport z analizy adnotacji waraintów
+
+Pakiet VariantAnnotation w genomice służy do wzbogacania informacji o wariantach genetycznych, czyli dołączania dodatkowych danych do wykrytych zmian w DNA (np. mutacji, delecji czy insercji). Dzięki temu możliwe jest głębsze zrozumienie ich biologicznych konsekwencji oraz potencjalnych powiązań z chorobami, cechami fenotypowymi czy procesami biologicznymi.
+
+Do kluczowych zastosowań pakietu VariantAnnotation w genomice należą:
+  
+- powiązywanie z istniejącymi bazami danych
+- analiza znaczenia wariantów
+- wzbogacanie informacji o wariantach
+- badanie skutków biologicznych (np. modyfikacje struktury białka, zakłócenia procesu transkrypcji)
+
+## 1. Instalowanie pakietów:
+
+Na wstępie zainstalowano i zaimportowano pakiety wymagane do przeprowadzenia analizy:
+
+- 'VariantAnnotation'
+- 'GenomicRanges'
+- 'AnnotationHub'
+
+```{r}
+packages <- c("VariantAnnotation", "GenomicRanges", "AnnotationHub")
+BiocManager::install(packages)
+```
+
+# Ładowanie pakietów:
+
+```{r}
+library(VariantAnnotation)
+library(GenomicRanges)
+library(AnnotationHub)
+```
+
+## 2. Wczytanie i eksploracja danych
+
+Używając funkcji readVcf z pakietu VariantAnnotation, zaimportowano przykładowy plik VCF. Następnie, za pomocą funkcji vcf, wyświetlono kluczowe informacje o zawartości pliku, takie jak:
+
+- nagłówki
+- lokalizacje w genomie
+- genotypy
+- rodzaj danych (string/float)
+
+```{r}
+
+#wczytanie ścieżki do pliku
+fl <- system.file("extdata", "chr22.vcf.gz", package="VariantAnnotation")
+
+#wczytanie pliku
+vcf <- readVcf(fl, "hg19")
+
+#podstawowe informacje o pliku
+vcf
+```
+
+## 3. Analiza jakości
+
+Korzystając z funkcji summary(qual(vcf)), przeprowadzono analizę jakości, która umożliwiła uzyskanie informacji takich jak:
+
+- wartość minimalna
+- wartość maksymalna
+- średnia
+- mediana
+- pierwszy i trzeci kwartyl
+- liczba brakujących danych
+
+```{r}
+summary(qual(vcf))
+```
+
+## 4. Filtrowanie wariantów
+
+Za pomocą funkcji vcf[!is.na(qual(vcf)) & qual(vcf) > 99, ] przefiltrowano warianty w następujący sposób:
+
+- !is.na(qual(vcf)) uwzględniono jedynie warianty z uzupełnionymi wartościami jakości
+- qual(vcf) > 99 wybrano wyłącznie warianty charakteryzujące się bardzo wysoką jakością (powyżej 99)
+
+```{r}
+vcf_filtered <- vcf[!is.na(qual(vcf)) & qual(vcf) >99, ]
+vcf_filtered
+summary(qual(vcf_filtered))
+```
+
+## 5. Anotacja wiarantów
+
+Do przeprowadzenia adnotacji wariantów wykorzystano funkcję locateVariants w połączeniu z pakietem anotacyjnym TxDb.Hsapiens.UCSC.hg19.knownGene, co umożliwiło wzbogacenie wariantów o szczegółowe informacje genowe.
+
+Funkcja locateVariants pozwala określić położenie zmian w genomie w odniesieniu do genomu referencyjnego, a także ustalić, czy warianty znajdują się w regionach kodujących białka lub w innych istotnych obszarach.
+
+Przykłady zastosowania:
+
+- Lokalizacja SNP w regionach kodujących białka
+- Adnotacja wariantów z wykorzystaniem danych zewnętrznych
+- Ocena wpływu wariantów na geny
+
+```{r}
+BiocManager::install("TxDb.Hsapiens.UCSC.hg19.knownGene")
+```
+```{r}
+library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+txdb <- TxDb.Hsapiens.UCSC.hg19.knownGene
+```
+
+```{r}
+gr <- rowRanges(vcf_filtered)
+
+loc_anno <- locateVariants(gr, txdb, AllVariants())
+head(loc_anno)
+```
+
+## 6. Podsumowanie
+
+W trakcie analizy wykonano następujące etapy:
+
+- zaimportowanie i przegląd danych w formacie VCF
+- ocena jakości danych przy użyciu odpowiednich metryk
+- filtrowanie wariantów, aby zachować jedynie te o najwyższej jakości
+- anotacja wariantów z zastosowaniem pakietu anotacyjnego TxDb
