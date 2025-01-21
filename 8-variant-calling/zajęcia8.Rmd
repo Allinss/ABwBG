@@ -1,0 +1,291 @@
+---
+title: '1'
+author: "Martyna"
+date: "2025-01-21"
+output: html_document
+---
+
+
+# Variant Calling w R
+
+Wykrywanie wariantów (variant calling) to proces identyfikacji zmian w sekwencjach DNA, określanych jako warianty, polegający na porównaniu sekwencji genomu badanego organizmu z genomem referencyjnym. Zmiany te mogą obejmować różne typy, takie jak insercje, delecje, zamiany pojedynczych nukleotydów, a także bardziej złożone zmiany strukturalne, np. zmiany liczby kopii fragmentów DNA, transpozycje czy odwrócenie orientacji fragmentów DNA w obrębie chromosomów. Proces ten odgrywa kluczową rolę w badaniach genomowych i znajduje zastosowanie w:
+
+- badaniu genetycznych podstaw chorób,
+- identyfikacji mutacji związanych z cechami fenotypowymi,
+- badaniach nad ewolucją,
+- analizie różnorodności genetycznej w populacjach.
+---
+
+## 1. Instalacja i załadowanie niezbędnych pakietów
+
+Na początkowym etapie procesu instalowane i wczytywane są pakiety niezbędne do przeprowadzenia analizy danych genomowych z `Bioconductor`:
+
+'VariantTools' – narzędzie do analizy wariantów
+'Rsamtools' – obsługa plików BAM i FASTA
+'GenomicRanges' – manipulowanie zakresami genomowymi
+'GenomicFeatures' – zarządzanie informacjami o cechach genomu
+'VariantAnnotation' – dodawanie adnotacji do wariantów
+'BiocParallel' – wsparcie dla obliczeń równoległych
+
+
+# Instalacja menedżera pakietów Bioconductor (jeśli nie jest zainstalowany)
+```{R}
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+```
+
+```{r Instalacja pakietów}
+BiocManager::install(c("VariantTools", "Rsamtools", "GenomicRanges", "GenomicFeatures", "VariantAnnotation", "BiocParallel"))
+```
+
+```{r Załadowanie pakietów}
+library(VariantTools)
+library(Rsamtools)
+library(GenomicRanges)
+library(GenomicFeatures)
+library(VariantAnnotation)
+library(BiocParallel)
+```
+
+
+# Wyświetlenie pomocy dla pakietu `VariantTools`:
+
+```{R}
+??VariantTools
+```
+
+# Wprowadzenie do pakietu:
+
+```{R}
+vignette("VariantTools")
+```
+
+# Zapoznanie z kluczowymi funkcjami innych pakietów:
+
+    - `Rsamtools`: funkcje do pracy z plikami BAM/SAM.
+    - `GenomicRanges`: operacje na zakresach genomowych.
+    - `GenomicFeatures`: tworzenie obiektów opisujących cechy genomu.
+    - `VariantAnnotation`: funkcje do anotacji i manipulacji wariantami.
+    
+
+## 2. Konfiguracja środowiska pracy
+
+Korzystając z funkcji setwd, można ustawić katalog roboczy, co ułatwia organizację i zarządzanie plikami wejściowymi oraz wyjściowymi. Z kolei funkcja list.files() pozwala na wyświetlenie listy plików dostępnych w bieżącym katalogu.
+
+
+# Ustawienie katalogu roboczego:
+
+```{R}
+setwd("C:/Users/s207308/Desktop/alignment")
+```
+
+# Sprawdzenie dostepności plików:
+
+```{R}
+list.files()
+```
+
+# Upewnienie się, że w katalogu znajdują się:
+
+- Plik BAM z odczytami (`aligned_sample.BAM`)
+- Genom referencyjny w formacie FASTA (`ecoli_reference.fasta`)
+
+
+## 3. Wczytanie danych wejściowych
+
+Wczytaj plik BAM i genom referencyjny. Zindeksuj plik FASTA.
+
+
+# Wczytanie pliku BAM:
+
+Wyrównane odczyty sekwencyjne zapisane w pliku BAM (aligned_sample1.BAM) są wczytywane przy użyciu funkcji BamFile().
+
+```{R}
+bamfile <- "C:/Users/s207308/Desktop/alignment/aligned_sample.BAM"
+bam <- BamFile(bamfile)
+```
+
+# Wczytanie genomu referencyjnego:
+
+Plik genomu referencyjnego w formacie FASTA (ecoli_reference.fasta) jest importowany za pomocą funkcji FaFile().
+
+```{R}
+ref_genome <- "C:/Users/s207308/Desktop/alignment/ecoli_reference.fasta"
+fa <- FaFile(ref_genome)
+```
+
+
+## 4. Przesortowanie pliku BAM według współrzędnych
+
+Funkcja sortBam() sortuje plik BAM na podstawie współrzędnych, co usprawnia późniejsze indeksowanie i analizę danych.
+
+```{r}
+# Zdefiniowanie ścieżki wejściowej i wyjściowej
+input_bam <- "C:/Users/s207308/Desktop/alignment/aligned_sample.BAM"
+output_bam <- "C:/Users/s207308/Desktop/alignment/sorted_aligned_sample.BAM"
+
+# Sortowanie
+sortBam(file = input_bam, destination = output_bam, overwrite = TRUE)
+
+# Zdefiniowanie przesortowanego pliku
+sorted_bam <- "C:/Users/s207308/Desktop/alignment/sorted_aligned_sample.BAM.bam"    
+```
+
+# Indeksowanie pliku FASTA, jeśli indeks nie istnieje, oraz przesortowany plik BAM:
+
+Funkcje indexFa() i indexBam() służą do indeksowania odpowiednio plików FASTA oraz BAM, co pozwala na szybki dostęp do danych podczas analizy.
+
+```{R}
+indexFa(ref_genome)
+indexBam(sorted_bam)
+```
+
+
+## 5. Kontrola jakości danych sekwencyjnych
+
+Kontrola jakości jest kluczowa, aby zapewnić, że analiza wariantów opiera się na rzetelnych danych.
+
+
+# Sprawdźenie nagłówku pliku BAM:
+
+Funkcja scanBamHeader() pozwala na odczyt metadanych pliku BAM, co umożliwia sprawdzenie poprawności jego struktury.
+
+```{R}
+scanBamHeader(bam)
+```
+
+# Sprawdźenie podstawych statystyk pliku BAM:
+
+Funkcja idxstatsBam() generuje podstawowe statystyki, takie jak liczba odczytów przypisanych do sekwencji w genomie:
+
+Zmapowane odczyty: 713927
+Niezmapowane odczyty: 506059
+
+```{R}
+idxstats <- idxstatsBam(sorted_bam)
+print(idxstats)
+```
+
+# Obliczenie i opcjonalna wizualizacja pokrycia genomu:
+
+Za pomocą funkcji coverage() można obliczyć liczbę odczytów przypadających na każdą pozycję w genomie, co określa pokrycie genomu. Wizualizacja wyników przy użyciu plot(coverage_data) umożliwia ocenę jakości pokrycia. Regiony o bardzo wysokim pokryciu mogą sugerować obecność artefaktów lub sekwencji powtarzalnych, podczas gdy niskie pokrycie może wskazywać na problemy techniczne podczas sekwencjonowania.
+
+```{R}
+coverage_data <- coverage(sorted_bam)
+summary(coverage_data[[1]]) # dla genomów prokariota
+```
+
+```{r}
+plot(coverage_data[[1]], main="Pokrycie genomu dla sekwencji U00096.3", ylab="Pokrycie", xlab="Pozycja w genomie") # uwaga: zajmuje dużo czasu
+
+```
+
+## 6. Wykrywanie wariantów
+
+Wykryj warianty za pomocą funkcji `callVariants()`.
+
+
+# Zdefiniowanie parametrów skanowania za pomocą `pileup()` z pakietu `Rsamtools`.
+
+Funkcja pileup() generuje informacje o liczbie odczytów przypadających na każdą pozycję w genomie, uwzględniając minimalną jakość bazy i pomijając podział na nici DNA.
+
+```{R}
+# Ustawienie parametrów pileup
+pileup_param <- PileupParam(
+    distinguish_strands = FALSE,
+    distinguish_nucleotides = TRUE,
+    min_base_quality = 20
+)
+
+# Wykonanie pileup
+pile_df <- pileup(sorted_bam, scanBamParam = ScanBamParam(), pileupParam = pileup_param)
+
+```
+
+# Konwersja wyników do ramki danych
+
+Wyniki uzyskane za pomocą pileup() są konwertowane na ramkę danych, a następnie analizowane przy użyciu pakietu dplyr. Do danych dodawane są także informacje o nazwach sekwencji i genomie referencyjnym.
+
+```{r}
+library(dplyr)
+
+pile_df <- pile_df %>%
+    mutate(seqnames = as.character(seqnames)) %>%
+    mutate(seqnames = ifelse(seqnames == "U00096.3", "NC_000913.3", seqnames))
+
+```
+
+# Pogrupowanie danych według pozycji
+
+```{r}
+variant_candidates <- pile_df %>%
+    group_by(seqnames, pos) %>%
+    summarise(
+        total = sum(count),
+        A = sum(count[nucleotide == "A"]),
+        C = sum(count[nucleotide == "C"]),
+        G = sum(count[nucleotide == "G"]),
+        T = sum(count[nucleotide == "T"]),
+        .groups = 'drop'
+    ) %>%
+    mutate(
+        ref = as.character(getSeq(fa, GRanges(seqnames, IRanges(pos, pos))))
+    ) %>%
+    rowwise() %>%
+    mutate(
+        # Obliczanie alternatywnych alleli
+        alt_alleles = list(setdiff(c("A", "C", "G", "T"), ref)),
+        # Liczenie odczytów dla referencyjnego i alternatywnych alleli
+        ref_count = sum(c_across(c("A", "C", "G", "T"))[ref]),
+        alt_count = sum(c_across(c("A", "C", "G", "T"))[alt_alleles])
+    ) %>%
+    ungroup() %>%
+    # Filtracja na podstawie minimalnej liczby odczytów dla wariantu
+    filter(alt_count >= 5) %>%
+    # Opcjonalne filtrowanie na podstawie proporcji
+    filter((alt_count / total) >= 0.2)
+
+```
+
+```{r}
+# Przykład wyświetlenia wariantów
+head(variant_candidates)
+```
+
+## 7. Filtracja i eksportowanie wyników do pliku
+
+Filtracja wariantów gwarantuje, że końcowe wyniki zawierają wyłącznie wiarygodne zmiany genetyczne. Stosowane kryteria obejmują:
+
+Minimalną liczbę odczytów dla danej pozycji (≥ 10)
+Proporcję odczytów alternatywnych (≥ 20%)
+Wyniki są następnie eksportowane do pliku CSV, co umożliwia ich dalszą analizę z wykorzystaniem innych narzędzi.
+
+```{r}
+# Filtracja wariantów na podstawie jakości i głębokości pokrycia
+filtered_variants <- variant_candidates %>%
+    filter(total >= 10, alt_count / total >= 0.2, alt_count >= 5)
+
+# Wyświetlenie liczby wariantów przed i po filtrowaniu
+cat("Liczba wariantów przed filtrowaniem:", nrow(variant_candidates), "\n")
+cat("Liczba wariantów po filtrowaniu:", nrow(filtered_variants), "\n")
+
+# Konwersja do data.frame dla eksportu
+df_variants <- as.data.frame(filtered_variants)
+
+# Eksport do pliku CSV
+write.csv(df_variants, "ścieżka/do/pliku/wyniki_wariantow.csv", row.names = FALSE)
+```
+
+Na podstawie liczby odczytów dla poszczególnych nukleotydów oraz zastosowania filtrów, takich jak minimalna liczba odczytów (≥ 5) i proporcja odczytów alternatywnych (≥ 20%), identyfikowane są potencjalne warianty, co pozwala na eliminację szumów technicznych.
+
+## 8. Podsumowanie 
+
+Kod realizuje kompleksową analizę wariantów genetycznych, obejmując następujące etapy:
+
+- Wczytywanie danych i ich wstępną obróbkę, w tym sortowanie oraz indeksowanie
+- Przeprowadzanie kontroli jakości danych sekwencyjnych
+- Wykrywanie wariantów za pomocą funkcji pileup
+- Filtrację potencjalnych wariantów
+- Eksport wyników do pliku CSV w celu dalszej analizy
+    
